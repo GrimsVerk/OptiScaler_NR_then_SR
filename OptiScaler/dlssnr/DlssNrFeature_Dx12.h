@@ -30,8 +30,12 @@ namespace DlssNr
 // timingQueue is the queue this command list will be executed on, when the caller knows it.
 // State::currentCommandQueue only exists once a D3D12 swapchain has been created, which a Vulkan
 // game never does -- so without this the pass runs and never reports what it cost.
+//
+// preUpscaleDeclined is ScopedPreUpscale::Declined() from the scope wrapped around this same
+// evaluate, when there was one. On stage 1 this pass stands down unless that scope declined the
+// evaluate for a reason this side can serve.
 void EvaluateAfterUpscale(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Parameter* params,
-                          ID3D12CommandQueue* timingQueue = nullptr);
+                          ID3D12CommandQueue* timingQueue = nullptr, bool preUpscaleDeclined = false);
 
 // The other place the model can run: before the upscaler, over the game's render-resolution colour.
 //
@@ -47,15 +51,21 @@ void EvaluateAfterUpscale(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Paramete
 // is reallocated. Construct it around the upscaler's evaluate and the destructor puts the original
 // back, whichever way the evaluate went.
 //
+//   bool declined = false;
 //   {
-//       DlssNr::ScopedPreUpscale pre(cmdList, params, isSuperResolution);
+//       DlssNr::ScopedPreUpscale pre(cmdList, params, isNotRayReconstruction);
 //       result = upscaler->Evaluate(cmdList, params);
+//       declined = pre.Declined();
 //   }
+//   DlssNr::EvaluateAfterUpscale(cmdList, params, queue, declined);
 //
 // applies says whether this evaluate is one the pre-upscale path should serve at all. Ray
 // reconstruction is not: its colour input is undenoised, and the model has no business synthesising
 // detail into noise. When the pre-upscale path declines an evaluate for such a reason, the
-// after-upscale path is allowed to run for it instead, so the frame is still served.
+// after-upscale path is allowed to run for it instead, so the frame is still served -- and the
+// caller carries that answer across, through Declined(), rather than the two sides sharing a global.
+// Frame generation evaluates do not get a scope at all: they are not upscales, and in Jedi Survivor
+// they arrive on their own command list interleaved with the upscaler's.
 //
 // Does nothing at all unless the pass is enabled and the stage is 1, so it is safe to leave in place
 // around every upscaler evaluate.
@@ -72,6 +82,10 @@ class ScopedPreUpscale
     // Whether the upscaler is reading the model's edit this frame.
     bool Swapped() const { return _swapped; }
 
+    // Whether this evaluate was handed to the after-upscale path instead. Pass it to
+    // EvaluateAfterUpscale for the same evaluate.
+    bool Declined() const { return _declined; }
+
   private:
     ID3D12GraphicsCommandList* _cmdList = nullptr;
     NVSDK_NGX_Parameter* _params = nullptr;
@@ -80,6 +94,7 @@ class ScopedPreUpscale
     // The state the copy was handed to the upscaler in, to move it back out of.
     int _scratchState = 0;
     bool _swapped = false;
+    bool _declined = false;
 };
 
 
