@@ -1,8 +1,50 @@
 # Neural Rendering before the upscaler
 
-Status: BUILT (2026-09-03), not compiled on Windows yet, not in-game tested. Written for whoever
-picks this up on a machine with the toolchain, the driver and an RTX 5080. D3D12 and the two
-D3D12 bridges only; native Vulkan stays on the after-upscale path.
+Status: BUILT and IN-GAME TESTED (2026-09-03) in Star Wars Jedi: Survivor, D3D12, RTX 5080, driver
+616.56, model 310.8.0.0. D3D12 and the two D3D12 bridges only; native Vulkan stays on the
+after-upscale path. Ray reconstruction, dynamic resolution and the D3D11 and Vulkan bridges were
+out of scope for that test and remain untested.
+
+## What the first test found
+
+Jedi Survivor, 4K windowed, DLSS Performance (1920x1080 render), the game's own DLSS frame
+generation on. Stage toggled in the overlay while playing; no restart.
+
+| | Stage 0 (after) | Stage 1 (before) |
+|---|---|---|
+| Model resolution | 3840x2160 | 1920x1080 |
+| Model cost / frame | 11.7 ms | 3.6 ms |
+| Pass total / frame | 12.1 ms | 3.7 ms |
+
+At DLSS Balanced (2260x1272) the model cost 4.5 ms. Quality, Balanced and Performance were
+switched in the game's menu with stage 1 on: each change reallocated the copy and rebuilt the
+model, and nothing crashed. The colour is `R11G11B10_FLOAT`, allocated with UAV + RT first try.
+
+What it looks like: the tester's words were "looks fine", with "some ghosting around the
+character's head" as the most noticeable defect, and an "upscaly feeling, same as AI-upscaled
+photos", which plain DLSS does not give. A matched capture of the render-size frame shows the
+model's edit as a modest contrast and micro-detail lift on an aliased, pre-antialiasing frame; the
+upscaler then enlarges that. No tonal shift: the mean luminance of the edit matches the original
+to within a few percent.
+
+Two things were wrong and were fixed the same day:
+
+1. **Frame generation evaluates were poisoning the after-upscale gate.** The game's DLSS frame
+   generation evaluates on its own command list, interleaved with the upscaler's. The scope was
+   being constructed for those evaluates too, declined them because they are not upscales, and
+   recorded the decline in a global that the *upscaler's* after-pass then read. The model ran once
+   after the upscaler at display size, was rebuilt there, and was rebuilt again at render size
+   the next frame. The decline now travels with the scope (`ScopedPreUpscale::Declined()`), the
+   caller hands it to `EvaluateAfterUpscale` for the same evaluate, and frame generation evaluates
+   get no scope at all.
+2. **The capture's "before" was the encoded proxy**, not the untouched frame, so before and after
+   were in different spaces and the pair looked like the model had darkened the frame by a stop.
+   It records the HDR copy now.
+
+And one thing the design hoped for is not there: **the model has no jitter parameter.** The DLL
+exposes 61 `DLSSNR.*` names -- colour, depth, motion vectors, the masks, the subrects, the
+strengths, `ScalingRatio`, `Reset` -- and none of them is jitter. The first fix under "what is
+expected to go wrong" is off the table; the motion-vector offset pass is the next one.
 
 ## The idea
 

@@ -337,11 +337,6 @@ struct PreUpscaleState
 
 PreUpscaleState g_pre;
 
-// Set by the pre-upscale scope when it declined an evaluate for a reason the after-upscale path can
-// serve -- ray reconstruction, a colour it cannot copy -- and read once by EvaluateAfterUpscale on
-// the same evaluate. Both run on the game's render thread, in that order, so a plain flag is enough.
-bool g_preUpscaleDeclined = false;
-
 // What the pass costs on the GPU, for the breakdown in the overlay.
 std::unique_ptr<GpuTime_Dx12> g_gpuTime;
 
@@ -2254,7 +2249,10 @@ bool DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
         // own.
         if (g_capture.isActive())
         {
-            g_capture.record(cmdList, device, g_nr.colorCopy,
+            // The untouched frame, not the encoded proxy: the two halves of a capture have to be in
+            // the same space to be compared, and colorCopy is display-referred while the target is
+            // linear. Reading the proxy as "before" made the frame look like it had lost a stop.
+            g_capture.record(cmdList, device, g_nr.hdrCopy,
                              D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, target,
                              D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
@@ -2495,7 +2493,7 @@ DlssNrFrameInfo GatherFrame(NVSDK_NGX_Parameter* params)
 // reprojection stage, a frame generation path, anything that is not the upscaler seam -- calls
 // RunPass directly and never touches an NGX parameter block.
 void EvaluateAfterUpscale(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Parameter* params,
-                          ID3D12CommandQueue* timingQueue)
+                          ID3D12CommandQueue* timingQueue, bool preUpscaleDeclined)
 {
     if (!Config::Instance()->DlssNrEnabled.value_or_default())
     {
@@ -2509,19 +2507,19 @@ void EvaluateAfterUpscale(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Paramete
         return;
     }
 
-    // Stage 1 runs the model before the upscaler, and this is after it. The pre-upscale scope says
-    // when it declined an evaluate for a reason this path can serve -- ray reconstruction, a colour
-    // it could not copy -- and only then does this path run under stage 1. Otherwise the model would
-    // run twice a frame, on both sides of the upscaler.
+    // Stage 1 runs the model before the upscaler, and this is after it. The caller says whether the
+    // pre-upscale scope it wrapped around this same evaluate declined it for a reason this path can
+    // serve -- ray reconstruction, a colour it could not copy -- and only then does this path run
+    // under stage 1. Otherwise the model would run twice a frame, on both sides of the upscaler.
+    //
+    // The answer travels with the evaluate rather than through a global on purpose. Jedi Survivor's
+    // frame generation evaluates on its own command list, interleaved with the upscaler's, and a
+    // global flag written by one evaluate was read by the other: the after-upscale pass ran, the
+    // model was rebuilt at display size, and rebuilt again at render size the next frame.
+    if (Config::Instance()->DlssNrStage.value_or_default() == 1 && !preUpscaleDeclined)
     {
-        const bool declined = g_preUpscaleDeclined;
-        g_preUpscaleDeclined = false;
-
-        if (Config::Instance()->DlssNrStage.value_or_default() == 1 && !declined)
-        {
-            ReportSkipOnce("stage 1: the model runs before the upscaler, so the after-upscale pass stands down");
-            return;
-        }
+        ReportSkipOnce("stage 1: the model runs before the upscaler, so the after-upscale pass stands down");
+        return;
     }
 
     // Which of the game's APIs this evaluate arrived through.
@@ -2591,8 +2589,6 @@ ScopedPreUpscale::ScopedPreUpscale(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX
                                    bool applies, ID3D12CommandQueue* timingQueue)
     : _cmdList(cmdList), _params(params)
 {
-    g_preUpscaleDeclined = false;
-
     const Config& cfg = *Config::Instance();
 
     if (!cfg.DlssNrEnabled.value_or_default() || cfg.DlssNrStage.value_or_default() != 1)
@@ -2604,9 +2600,12 @@ ScopedPreUpscale::ScopedPreUpscale(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX
     // Declining hands the evaluate to the after-upscale path; a plain return does not. The
     // distinction is whether the model could still do a sensible job of this frame from the other
     // side, and for ray reconstruction it can: the finished frame is denoised, the input is not.
-    auto decline = [](const char* why)
+    // The answer is kept on this scope, so it can only ever reach the after-upscale call for the
+    // same evaluate; see EvaluateAfterUpscale for the frame-generation interleaving that made a
+    // global flag wrong.
+    auto decline = [this](const char* why)
     {
-        g_preUpscaleDeclined = true;
+        _declined = true;
         ReportSkipOnce(why);
     };
 

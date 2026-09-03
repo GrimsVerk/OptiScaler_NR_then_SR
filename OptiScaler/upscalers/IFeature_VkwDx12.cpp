@@ -2157,10 +2157,13 @@ bool IFeature_VkwDx12::Evaluate(VkCommandBuffer InCmdBuffer, NVSDK_NGX_Parameter
 
         LOG_DEBUG("Dispatch!!");
 
+        bool preUpscaleDeclined = false;
+
         {
             // Neural Rendering before the upscaler, when the stage says so; see the D3D11 bridge.
             DlssNr::ScopedPreUpscale pre(cmdList, InParameters, true, Dx12CommandQueue);
             dx12EvalResult = dx12Feature->Evaluate(cmdList, InParameters);
+            preUpscaleDeclined = pre.Declined();
         }
 
         // The parameter block still holds the D3D12 resources written above -- the Vulkan handles are
@@ -2175,7 +2178,7 @@ bool IFeature_VkwDx12::Evaluate(VkCommandBuffer InCmdBuffer, NVSDK_NGX_Parameter
         }
 
         if (dx12EvalResult && Config::Instance()->DlssNrEnabled.value_or_default())
-            DlssNr::EvaluateAfterUpscale(cmdList, InParameters, Dx12CommandQueue);
+            DlssNr::EvaluateAfterUpscale(cmdList, InParameters, Dx12CommandQueue, preUpscaleDeclined);
 
     } while (false);
 
