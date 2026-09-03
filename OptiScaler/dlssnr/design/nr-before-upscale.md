@@ -156,6 +156,13 @@ at 1920x1080:
 | The DLAA of the render | 0.0030 | 0.00025 |
 | (Stage 0 at working scale 50%, for reference) | 0.0016 | 0.00020 |
 
+By eye, in movement, the tester called DLAA *worse*: "more smooth and blurry", a few fps lower,
+against a raw path that "is actually clearer". The measurement and the eye do not disagree: the
+edit on an antialiased input is steadier because it is also gentler -- fewer hard edges to sharpen,
+so less added, and what is added is smoother -- and part of what reads as crispness on the raw
+path is the instability itself. Whether a higher detail strength on the DLAA input buys back the
+crispness without the wobble is the next one-line test.
+
 Half the wobble gone at edges and in the flat, in one step, with no hand-written temporal filter.
 Stage 1 with DLAA now sits at twice stage 0's edge wobble and matches it in the flat. What is left
 at edges is the bilinear read-back of the edit onto the jittered raw frame, plus whatever the model
