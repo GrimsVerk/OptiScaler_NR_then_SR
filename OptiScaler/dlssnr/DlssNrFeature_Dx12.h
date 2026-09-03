@@ -33,6 +33,55 @@ namespace DlssNr
 void EvaluateAfterUpscale(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Parameter* params,
                           ID3D12CommandQueue* timingQueue = nullptr);
 
+// The other place the model can run: before the upscaler, over the game's render-resolution colour.
+//
+// Stage 1 in the config. The model is shown the colour the game is about to hand the upscaler --
+// jittered, aliased, at render size -- with depth and motion vectors that are for once the same size
+// as the picture. Its edit is composed into a private copy of that colour, and for the duration of
+// the upscaler's evaluate the parameter block names the copy as the colour input. The game's own
+// buffer is never written. The upscaler then enlarges the edited frame exactly as it would have
+// enlarged the original, and everything after it -- frame generation, the interface -- is untouched.
+//
+// Why it is a scope: the swap has to be undone. The parameter block is the game's, it is reused
+// next frame, and a block still pointing at a texture of ours is a stale read the moment the copy
+// is reallocated. Construct it around the upscaler's evaluate and the destructor puts the original
+// back, whichever way the evaluate went.
+//
+//   {
+//       DlssNr::ScopedPreUpscale pre(cmdList, params, isSuperResolution);
+//       result = upscaler->Evaluate(cmdList, params);
+//   }
+//
+// applies says whether this evaluate is one the pre-upscale path should serve at all. Ray
+// reconstruction is not: its colour input is undenoised, and the model has no business synthesising
+// detail into noise. When the pre-upscale path declines an evaluate for such a reason, the
+// after-upscale path is allowed to run for it instead, so the frame is still served.
+//
+// Does nothing at all unless the pass is enabled and the stage is 1, so it is safe to leave in place
+// around every upscaler evaluate.
+class ScopedPreUpscale
+{
+  public:
+    ScopedPreUpscale(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Parameter* params, bool applies,
+                     ID3D12CommandQueue* timingQueue = nullptr);
+    ~ScopedPreUpscale();
+
+    ScopedPreUpscale(const ScopedPreUpscale&) = delete;
+    ScopedPreUpscale& operator=(const ScopedPreUpscale&) = delete;
+
+    // Whether the upscaler is reading the model's edit this frame.
+    bool Swapped() const { return _swapped; }
+
+  private:
+    ID3D12GraphicsCommandList* _cmdList = nullptr;
+    NVSDK_NGX_Parameter* _params = nullptr;
+    ID3D12Resource* _original = nullptr;
+    bool _originalTyped = false;
+    // The state the copy was handed to the upscaler in, to move it back out of.
+    int _scratchState = 0;
+    bool _swapped = false;
+};
+
 
 
 // Frame generation titles tag their UI layer through Streamline; a copy of it makes the HUD mask

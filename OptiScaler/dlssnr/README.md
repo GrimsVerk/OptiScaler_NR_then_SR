@@ -22,10 +22,10 @@ Nothing else refers to it.
 
 | File | Sites | What the calls do |
 |---|---|---|
-| `inputs/NVNGX_DLSS_Dx12.cpp` | 2 | the pass after an upscale, on each of the two evaluate routes |
+| `inputs/NVNGX_DLSS_Dx12.cpp` | 4 | the pass after an upscale, and the scope before it, on each of the two evaluate routes |
 | `menu/menu_common.cpp` | 2 | the settings panel, and the cost row in the timing table |
-| `upscalers/IFeature_Dx11wDx12.cpp` | 1 | the pass inside the D3D11-on-D3D12 bridge |
-| `upscalers/IFeature_VkwDx12.cpp` | 1 | the pass inside the Vulkan-on-D3D12 bridge |
+| `upscalers/IFeature_Dx11wDx12.cpp` | 2 | the pass after, and the scope before, inside the D3D11-on-D3D12 bridge |
+| `upscalers/IFeature_VkwDx12.cpp` | 2 | the pass after, and the scope before, inside the Vulkan-on-D3D12 bridge |
 | `Config.h` / `Config.cpp` | 3 | the `[DlssNr]` declarations and their read/write runs |
 
 The config block is contiguous and marked `removable as one block` at both ends, so it lifts out
@@ -118,6 +118,11 @@ part of the solution, and builds with everything else.
   interfaces are translucent and animated. Separation from the world was 2.5:1 — not a detector at
   any threshold. The interface is safe because the pass runs before it is drawn, not because
   anything looks for it.
+- **The model can run on either side of the upscaler.** `[DlssNr] Stage=1` runs it before, over the
+  game's render-resolution colour, and hands the upscaler the edited copy through
+  `DlssNr::ScopedPreUpscale`; the after-upscale pass stands down on those evaluates. The pass itself
+  is the same code with the source and the target split apart. See `design/nr-before-upscale.md`
+  for what it is for, what it costs, and what is expected to go wrong first.
 - **The split pipeline was removed.** It ran Ray Reconstruction at 1:1, the model on that frame,
   then an internal Super Resolution pass to the target size, to give the model a real temporal
   accumulator behind it. It was removed once the plain path did the same job — but note that the
