@@ -66,6 +66,14 @@ is the signature of a temporal history that is not being moved far enough, or no
 it should be. A scale, sign or unit mismatch between what the game hands DLSS and what the model
 expects would produce it on both stages, and would be cheap to probe with a diagnostic multiplier.
 
+That probe is built: `[DlssNr] ProbeMvScaleX/Y` and `ProbeResetEveryFrame`, live in the menu under
+"Diagnostics". The test is: detail strength 1, stage 1, a moving character, and one change at a
+time -- reset every frame on; then reset off and X and Y both 0; both -1; both 0.5; both 2. Each
+answer is one line: does the ghost vanish, shrink, grow, or flip to the other side. If the reset
+kills it, the ghost is the history. If a multiplier kills it, that multiplier is the convention
+mismatch and becomes the fix. If nothing moves it, the model does this to a single frame and the
+remaining lever is detail strength.
+
 And one thing the design hoped for is not there: **the model has no jitter parameter.** The DLL
 exposes 61 `DLSSNR.*` names -- colour, depth, motion vectors, the masks, the subrects, the
 strengths, `ScalingRatio`, `Reset` -- and none of them is jitter. The first fix under "what is
