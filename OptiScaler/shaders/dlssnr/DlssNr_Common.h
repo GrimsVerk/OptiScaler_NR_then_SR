@@ -112,6 +112,12 @@ struct DlssNrFrameInfo
     // picture that shifts under it. The after-upscale frame is already resolved.
     float JitterX = 0.0f;
     float JitterY = 0.0f;
+
+    // When the picture the model is shown is not the frame the edit lands on: the before-upscale
+    // path can hand the model an antialiased version of the render (DLAA) while composing the edit
+    // onto the raw jittered render itself. This is that raw frame, as an ID3D12Resource* the header
+    // does not name. Null means the model sees the frame it edits, which is every other case.
+    void* OriginalOverride = nullptr;
 };
 
 struct alignas(256) DlssNrConstants
@@ -191,6 +197,12 @@ struct alignas(256) DlssNrConstants
     float JitterX;
     float JitterY;
     uint32_t Unjitter;
+
+    // The model was shown a different picture from the one the edit lands on (the DLAA pre-pass).
+    // The encode keeps the untouched copy from the original slot instead of the source, and the
+    // resolve carries only the model's difference across, on the original's own proxy, because a
+    // ratio between an antialiased proxy and an aliased frame is an edge artefact, not an edit.
+    uint32_t ForeignInput;
 };
 
 class DlssNr_Common

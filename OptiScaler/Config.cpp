@@ -365,6 +365,7 @@ bool Config::Reload(std::filesystem::path iniPath)
             DlssNrProbeMvScaleY.set_from_config(readFloat("DlssNr", "ProbeMvScaleY"));
             DlssNrProbeResetEveryFrame.set_from_config(readBool("DlssNr", "ProbeResetEveryFrame"));
             DlssNrUnjitter.set_from_config(readUInt("DlssNr", "Unjitter"));
+            DlssNrStage1Input.set_from_config(readUInt("DlssNr", "Stage1Input"));
             UseGenericAppIdWithDlss.set_from_config(readBool("DLSS", "UseGenericAppIdWithDlss"));
 
             RenderPresetOverride.set_from_config(readBool("DLSS", "RenderPresetOverride"));
@@ -1260,6 +1261,7 @@ bool Config::SaveIni()
     ini.SetValue("DlssNr", "ProbeResetEveryFrame",
                  GetBoolValue(Instance()->DlssNrProbeResetEveryFrame.value_for_config()).c_str());
     ini.SetValue("DlssNr", "Unjitter", GetIntValue(Instance()->DlssNrUnjitter.value_for_config()).c_str());
+    ini.SetValue("DlssNr", "Stage1Input", GetIntValue(Instance()->DlssNrStage1Input.value_for_config()).c_str());
         ini.SetValue("DLSS", "RenderPresetOverride",
                      GetBoolValue(Instance()->RenderPresetOverride.value_for_config()).c_str());
         ini.SetValue("DLSS", "RenderPresetForAll",

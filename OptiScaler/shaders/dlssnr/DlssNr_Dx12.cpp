@@ -333,6 +333,20 @@ struct PreUpscaleState
     unsigned int width = 0;
     unsigned int height = 0;
     DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
+
+    // The DLAA pre-pass: the driver's own DLSS run at 1:1 over the render, into a surface only the
+    // model ever reads. The model then sees an antialiased, temporally settled picture instead of
+    // the raw jittered raster it re-decides every edge on. The edit is composed onto the raw render
+    // regardless; this surface is discarded once the model has looked at it. See Stage1Input.
+    NVSDK_NGX_Handle* dlaaHandle = nullptr;
+    NVSDK_NGX_Parameter* dlaaParams = nullptr;
+    ID3D12Resource* dlaa = nullptr;
+    unsigned int dlaaWidth = 0;
+    unsigned int dlaaHeight = 0;
+    DXGI_FORMAT dlaaFormat = DXGI_FORMAT_UNKNOWN;
+    unsigned int dlaaFlags = 0;
+    bool dlaaFailed = false;
+    const char* dlaaReason = "";
 };
 
 PreUpscaleState g_pre;
@@ -637,6 +651,9 @@ void DiscoverFloatSlot(NVSDK_NGX_Parameter* params)
 struct NrRetired
 {
     void* feature = nullptr;
+    // A feature of the driver's own DLSS (the DLAA pre-pass), released through NGX rather than the
+    // forwarder.
+    NVSDK_NGX_Handle* ngxFeature = nullptr;
     ID3D12Resource* resource = nullptr;
     int framesLeft = 32;
 };
@@ -650,6 +667,17 @@ void ParkNrFeature(void*& feature)
 
     NrRetired r;
     r.feature = feature;
+    feature = nullptr;
+    g_nrRetired.push_back(r);
+}
+
+void ParkNgxFeature(NVSDK_NGX_Handle*& feature)
+{
+    if (feature == nullptr)
+        return;
+
+    NrRetired r;
+    r.ngxFeature = feature;
     feature = nullptr;
     g_nrRetired.push_back(r);
 }
@@ -677,6 +705,9 @@ void TickNrRetired()
 
         if (g_nrRetired[i].feature != nullptr && g_nr.release != nullptr)
             g_nr.release(g_nrRetired[i].feature);
+
+        if (g_nrRetired[i].ngxFeature != nullptr && NVNGXProxy::D3D12_ReleaseFeature() != nullptr)
+            NVNGXProxy::D3D12_ReleaseFeature()(g_nrRetired[i].ngxFeature);
 
         if (g_nrRetired[i].resource != nullptr)
             g_nrRetired[i].resource->Release();
@@ -1548,6 +1579,12 @@ bool DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
     ID3D12Resource* const source = colour;
     const bool sourceIsTarget = source == target;
 
+    // The frame the edit lands on. The same as the source everywhere except the DLAA pre-pass,
+    // where the model is shown an antialiased picture and the edit is composed onto the raw render.
+    ID3D12Resource* const original =
+        frame.OriginalOverride != nullptr ? static_cast<ID3D12Resource*>(frame.OriginalOverride) : source;
+    const bool foreignInput = original != source;
+
     // Whether the resolve wrote the target this frame. See the header.
     bool wrote = false;
 
@@ -2008,20 +2045,31 @@ bool DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
 
     // Un-jittering only has a jittered frame to act on before the upscaler. After it the frame is
     // resolved, and the offset would only move a still picture.
+    //
+    // With the DLAA pre-pass the picture the model sees is already on the un-jittered grid, so the
+    // encode must not shift it -- but the edit still has to be read back onto the jittered raw
+    // render, so the resolve always shifts, with the sign the control chose (+ unless told -).
     const uint32_t unjitter = sourceIsTarget ? 0u : cfg.DlssNrUnjitter.value_or_default();
+    const uint32_t encodeUnjitter = foreignInput ? 0u : unjitter;
+    const uint32_t resolveUnjitter = foreignInput ? (unjitter == 2u ? 2u : 1u) : unjitter;
     encodeParams.JitterX = frame.JitterX;
     encodeParams.JitterY = frame.JitterY;
-    encodeParams.Unjitter = unjitter;
+    encodeParams.Unjitter = encodeUnjitter;
+    encodeParams.ForeignInput = foreignInput ? 1u : 0u;
 
     {
         static uint32_t saidUnjitter = 0;
+        static bool saidForeign = false;
 
-        if (saidUnjitter != unjitter)
+        if (saidUnjitter != unjitter || saidForeign != foreignInput)
         {
             saidUnjitter = unjitter;
-            LOG_INFO("DLSS-NR un-jitter: {} (this frame's jitter {} x {})",
+            saidForeign = foreignInput;
+            LOG_INFO("DLSS-NR un-jitter: {} (this frame's jitter {} x {}); the model sees {}",
                      unjitter == 0 ? "off" : unjitter == 1 ? "sample at +jitter" : "sample at -jitter",
-                     frame.JitterX, frame.JitterY);
+                     frame.JitterX, frame.JitterY,
+                     foreignInput ? "the DLAA of the render, and the edit is read back by the jitter"
+                                  : "the frame the edit lands on");
         }
     }
 
@@ -2032,7 +2080,7 @@ bool DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
         Barrier(cmdList, target, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                 D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
-    DispatchPass(cmdList, encodeParams, source, nullptr, nullptr, nullptr, nullptr,
+    DispatchPass(cmdList, encodeParams, source, nullptr, original, nullptr, nullptr,
                         g_nr.colorCopy, g_nr.hdrCopy);
 
     if (sourceIsTarget)
@@ -2219,7 +2267,8 @@ bool DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
         resolveParams.CompareSwap = cfg.DlssNrCompareSwap.value_or_default() ? 1u : 0u;
         resolveParams.JitterX = frame.JitterX;
         resolveParams.JitterY = frame.JitterY;
-        resolveParams.Unjitter = unjitter;
+        resolveParams.Unjitter = resolveUnjitter;
+        resolveParams.ForeignInput = foreignInput ? 1u : 0u;
 
         // The numbers the composition actually ran with, logged when any of them changes.
         //
@@ -2387,6 +2436,8 @@ void RetryAfterFailure()
     g_nr.failed = false;
     g_nr.reason = "";
     g_nr.reset = true;
+    g_pre.dlaaFailed = false;
+    g_pre.dlaaReason = "";
 
 }
 
@@ -2635,6 +2686,188 @@ void EvaluateAfterUpscale(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Paramete
 // Before the upscaler.
 // ---------------------------------------------------------------------------------------------
 
+namespace
+{
+
+void FailDlaa(const char* why)
+{
+    g_pre.dlaaFailed = true;
+    g_pre.dlaaReason = why;
+    LOG_ERROR("DLSS-NR stage 1: the DLAA pre-pass is off for this session: {}", why);
+}
+
+// Runs the driver's own DLSS at 1:1 over the game's render -- DLAA -- into a surface for the model's
+// eyes. Returns that surface resting in NON_PIXEL_SHADER_RESOURCE, or nullptr when there is nothing
+// usable this frame: the feature was only just created, or it has failed. The caller then shows the
+// model the raw render, exactly as without the pre-pass.
+//
+// Fed the same depth, motion vectors, jitter, exposure and flags the game handed its own DLSS this
+// frame, from the same parameter block. Created on the game's command list and first evaluated a
+// frame later, the rule the model itself is under: creating and evaluating on one list hung the GPU.
+ID3D12Resource* RunDlaa(ID3D12GraphicsCommandList* cmdList, ID3D12Device* device, NVSDK_NGX_Parameter* params,
+                        ID3D12Resource* colour, ID3D12Resource* depth, ID3D12Resource* motion,
+                        unsigned int width, unsigned int height, DXGI_FORMAT format,
+                        const DlssNrFrameInfo& frame)
+{
+    if (g_pre.dlaaFailed)
+        return nullptr;
+
+    if (!NVNGXProxy::IsDx12Inited() || NVNGXProxy::D3D12_CreateFeature() == nullptr ||
+        NVNGXProxy::D3D12_EvaluateFeature() == nullptr || NVNGXProxy::D3D12_ReleaseFeature() == nullptr)
+    {
+        FailDlaa("the driver's DLSS is not initialised in this process");
+        return nullptr;
+    }
+
+    // The game's own creation flags, minus sharpening, which has no place in a picture that only
+    // the model sees.
+    unsigned int flags = 0;
+    params->Get(NVSDK_NGX_Parameter_DLSS_Feature_Create_Flags, &flags);
+    flags &= ~(unsigned int) NVSDK_NGX_DLSS_Feature_Flags_DoSharpening;
+
+    if (g_pre.dlaaHandle != nullptr && (g_pre.dlaaWidth != width || g_pre.dlaaHeight != height ||
+                                        g_pre.dlaaFormat != format || g_pre.dlaaFlags != flags))
+    {
+        // Parked, not released: the previous frame's evaluate may still be on the GPU.
+        ParkNgxFeature(g_pre.dlaaHandle);
+        ParkNrResource(g_pre.dlaa);
+    }
+
+    if (g_pre.dlaa == nullptr)
+    {
+        g_pre.dlaa = CreatePreUpscaleScratch(device, format, width, height);
+
+        if (g_pre.dlaa == nullptr)
+        {
+            FailDlaa("its output surface could not be allocated");
+            return nullptr;
+        }
+    }
+
+    if (g_pre.dlaaParams == nullptr)
+    {
+        NVSDK_NGX_Result r = NVSDK_NGX_Result_Fail;
+
+        if (NVNGXProxy::D3D12_AllocateParameters() != nullptr)
+            r = NVNGXProxy::D3D12_AllocateParameters()(&g_pre.dlaaParams);
+        else if (NVNGXProxy::D3D12_GetParameters() != nullptr)
+            r = NVNGXProxy::D3D12_GetParameters()(&g_pre.dlaaParams);
+
+        if (r != NVSDK_NGX_Result_Success || g_pre.dlaaParams == nullptr)
+        {
+            g_pre.dlaaParams = nullptr;
+            FailDlaa("the driver would not allocate a parameter block for it");
+            return nullptr;
+        }
+    }
+
+    NVSDK_NGX_Parameter* p = g_pre.dlaaParams;
+
+    if (g_pre.dlaaHandle == nullptr)
+    {
+        p->Set(NVSDK_NGX_Parameter_Width, width);
+        p->Set(NVSDK_NGX_Parameter_Height, height);
+        p->Set(NVSDK_NGX_Parameter_OutWidth, width);
+        p->Set(NVSDK_NGX_Parameter_OutHeight, height);
+        p->Set(NVSDK_NGX_Parameter_PerfQualityValue, (int) NVSDK_NGX_PerfQuality_Value_DLAA);
+        p->Set(NVSDK_NGX_Parameter_DLSS_Feature_Create_Flags, flags);
+        p->Set(NVSDK_NGX_Parameter_DLSS_Enable_Output_Subrects, 0u);
+
+        NVSDK_NGX_Result r;
+        {
+            ScopedSkipHeapCapture skipHeapCapture {};
+            r = NVNGXProxy::D3D12_CreateFeature()(cmdList, NVSDK_NGX_Feature_SuperSampling, p, &g_pre.dlaaHandle);
+        }
+
+        if (r != NVSDK_NGX_Result_Success || g_pre.dlaaHandle == nullptr)
+        {
+            g_pre.dlaaHandle = nullptr;
+            LOG_ERROR("DLSS-NR stage 1: DLAA CreateFeature returned 0x{:X} ({})", (unsigned int) r,
+                      NgxResultName((unsigned int) r));
+            FailDlaa("the driver would not create the DLAA feature");
+            return nullptr;
+        }
+
+        g_pre.dlaaWidth = width;
+        g_pre.dlaaHeight = height;
+        g_pre.dlaaFormat = format;
+        g_pre.dlaaFlags = flags;
+        LOG_INFO("DLSS-NR stage 1: DLAA pre-pass created at {}x{} (flags 0x{:X}); from the next frame the model "
+                 "sees the antialiased render and the edit lands on the raw one",
+                 width, height, flags);
+
+        // Never on the list it was created on.
+        return nullptr;
+    }
+
+    // What this frame's evaluate needs, copied from the block the game filled for its own DLSS.
+    p->Set(NVSDK_NGX_Parameter_Color, colour);
+    p->Set(NVSDK_NGX_Parameter_Output, g_pre.dlaa);
+    p->Set(NVSDK_NGX_Parameter_Depth, depth);
+    p->Set(NVSDK_NGX_Parameter_MotionVectors, motion);
+    p->Set(NVSDK_NGX_Parameter_Jitter_Offset_X, frame.JitterX);
+    p->Set(NVSDK_NGX_Parameter_Jitter_Offset_Y, frame.JitterY);
+    p->Set(NVSDK_NGX_Parameter_MV_Scale_X, frame.MvScaleX);
+    p->Set(NVSDK_NGX_Parameter_MV_Scale_Y, frame.MvScaleY);
+    p->Set(NVSDK_NGX_Parameter_Reset, frame.Reset ? 1 : 0);
+    p->Set(NVSDK_NGX_Parameter_Sharpness, 0.0f);
+    p->Set(NVSDK_NGX_Parameter_DLSS_Pre_Exposure, frame.PreExposure);
+    p->Set(NVSDK_NGX_Parameter_ExposureTexture, static_cast<ID3D12Resource*>(frame.ExposureTexture));
+    p->Set(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Width, width);
+    p->Set(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Height, height);
+    p->Set(NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_X, 0u);
+    p->Set(NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_Y, 0u);
+    p->Set(NVSDK_NGX_Parameter_DLSS_Input_Depth_Subrect_Base_X, 0u);
+    p->Set(NVSDK_NGX_Parameter_DLSS_Input_Depth_Subrect_Base_Y, 0u);
+    p->Set(NVSDK_NGX_Parameter_DLSS_Input_MV_SubrectBase_X, 0u);
+    p->Set(NVSDK_NGX_Parameter_DLSS_Input_MV_SubrectBase_Y, 0u);
+    p->Set(NVSDK_NGX_Parameter_DLSS_Output_Subrect_Base_X, 0u);
+    p->Set(NVSDK_NGX_Parameter_DLSS_Output_Subrect_Base_Y, 0u);
+
+    {
+        float exposureScale = 1.0f;
+
+        if (params->Get(NVSDK_NGX_Parameter_DLSS_Exposure_Scale, &exposureScale) == NVSDK_NGX_Result_Success)
+            p->Set(NVSDK_NGX_Parameter_DLSS_Exposure_Scale, exposureScale);
+
+        float frameTime = 0.0f;
+
+        if (params->Get(NVSDK_NGX_Parameter_FrameTimeDeltaInMsec, &frameTime) == NVSDK_NGX_Result_Success)
+            p->Set(NVSDK_NGX_Parameter_FrameTimeDeltaInMsec, frameTime);
+
+        int invertX = 0, invertY = 0;
+
+        if (params->Get(NVSDK_NGX_Parameter_DLSS_Indicator_Invert_X_Axis, &invertX) == NVSDK_NGX_Result_Success)
+            p->Set(NVSDK_NGX_Parameter_DLSS_Indicator_Invert_X_Axis, invertX);
+
+        if (params->Get(NVSDK_NGX_Parameter_DLSS_Indicator_Invert_Y_Axis, &invertY) == NVSDK_NGX_Result_Success)
+            p->Set(NVSDK_NGX_Parameter_DLSS_Indicator_Invert_Y_Axis, invertY);
+    }
+
+    // The inputs rest where NGX wants them -- the scope moved the colour there and the game's own
+    // DLSS is about to read the guides in the same states -- and the output rests in UAV.
+    NVSDK_NGX_Result r;
+    {
+        ScopedSkipHeapCapture skipHeapCapture {};
+        r = NVNGXProxy::D3D12_EvaluateFeature()(cmdList, g_pre.dlaaHandle, p, nullptr);
+    }
+
+    if (r != NVSDK_NGX_Result_Success)
+    {
+        LOG_ERROR("DLSS-NR stage 1: DLAA EvaluateFeature returned 0x{:X} ({})", (unsigned int) r,
+                  NgxResultName((unsigned int) r));
+        FailDlaa("the DLAA evaluate failed");
+        return nullptr;
+    }
+
+    Barrier(cmdList, g_pre.dlaa, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
+    return g_pre.dlaa;
+}
+
+} // namespace
+
 ScopedPreUpscale::ScopedPreUpscale(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Parameter* params,
                                    bool applies, ID3D12CommandQueue* timingQueue)
     : _cmdList(cmdList), _params(params)
@@ -2800,6 +3033,34 @@ ScopedPreUpscale::ScopedPreUpscale(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX
 
     Barrier(cmdList, colour, colourRest, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
+    // What the model is shown. The raw render, or -- Stage1Input 1 -- the driver's DLAA of it, an
+    // antialiased picture that holds still between frames. The edit lands on the raw render either
+    // way; see DlssNrFrameInfo::OriginalOverride.
+    ID3D12Resource* modelInput = colour;
+
+    {
+        static uint32_t saidInput = 0;
+        const uint32_t input = cfg.DlssNrStage1Input.value_or_default();
+
+        if (saidInput != input)
+        {
+            saidInput = input;
+            LOG_INFO("DLSS-NR stage 1: the model is shown {}",
+                     input == 1 ? "the DLAA of the render" : "the raw render");
+        }
+
+        if (input == 1)
+        {
+            ID3D12Resource* aa = RunDlaa(cmdList, device, params, colour, depth, motion, width, height, format, frame);
+
+            if (aa != nullptr)
+            {
+                modelInput = aa;
+                frame.OriginalOverride = colour;
+            }
+        }
+    }
+
     if (g_compose == nullptr)
         g_compose = std::make_unique<DlssNr_Dx12>("Neural Rendering", device);
 
@@ -2808,7 +3069,12 @@ ScopedPreUpscale::ScopedPreUpscale(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX
     bool wrote = false;
 
     if (g_compose != nullptr)
-        wrote = g_compose->Dispatch(cmdList, colour, depth, motion, g_pre.scratch, frame, timingQueue);
+        wrote = g_compose->Dispatch(cmdList, modelInput, depth, motion, g_pre.scratch, frame, timingQueue);
+
+    // The DLAA surface goes back to rest for the next evaluate to write.
+    if (modelInput != colour)
+        Barrier(cmdList, modelInput, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
     Barrier(cmdList, colour, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, colourRest);
 
@@ -3051,6 +3317,22 @@ void Shutdown()
     {
         g_pre.scratch->Release();
         g_pre.scratch = nullptr;
+    }
+
+    if (g_pre.dlaaHandle != nullptr && NVNGXProxy::D3D12_ReleaseFeature() != nullptr)
+        NVNGXProxy::D3D12_ReleaseFeature()(g_pre.dlaaHandle);
+
+    g_pre.dlaaHandle = nullptr;
+
+    if (g_pre.dlaaParams != nullptr && NVNGXProxy::D3D12_DestroyParameters() != nullptr)
+        NVNGXProxy::D3D12_DestroyParameters()(g_pre.dlaaParams);
+
+    g_pre.dlaaParams = nullptr;
+
+    if (g_pre.dlaa != nullptr)
+    {
+        g_pre.dlaa->Release();
+        g_pre.dlaa = nullptr;
     }
 
     if (g_nr.output != nullptr)

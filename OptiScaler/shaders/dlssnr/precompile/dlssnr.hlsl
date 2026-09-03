@@ -28,6 +28,7 @@ cbuffer Params : register(b0)
     float gJitterX;      // the game's sub-pixel jitter this frame, render pixels
     float gJitterY;
     uint  gUnjitter;     // 0 off, 1 sample the frame at +jitter and read the answer back at -jitter, 2 signs swapped
+    uint  gForeign;      // the model saw a different picture (DLAA) from the frame the edit lands on
 };
 
 // The offset, in frame pixels, that un-jittering moves the model's view of the frame by. Zero when
@@ -524,8 +525,11 @@ void CSMain(uint3 id : SV_DispatchThreadID)
         float4 source = gSource.Load(int3(id.xy, 0));
         float3 frame = max(source.rgb, float3(0.0, 0.0, 0.0));
 
-        // Kept so the resolve has the frame as it was, rather than having to reconstruct it.
-        gKeep[id.xy] = float4(frame, source.a);
+        // Kept so the resolve has the frame as it was, rather than having to reconstruct it. When the
+        // model is being shown something other than the frame -- the DLAA pre-pass -- the frame the
+        // edit lands on arrives in the original slot, and that is what is kept.
+        float4 keep = gForeign != 0 ? gOriginal.Load(int3(id.xy, 0)) : source;
+        gKeep[id.xy] = float4(max(keep.rgb, float3(0.0, 0.0, 0.0)), keep.a);
 
         // Before the upscaler the frame is the game's jittered render: the whole picture sits a
         // fraction of a pixel away from where it sat last frame, and the model re-decides every
@@ -701,7 +705,11 @@ void CSMain(uint3 id : SV_DispatchThreadID)
     gSource.GetDimensions(proxyW, proxyH);
     const bool modelRanSmall = proxyW != gWidth || proxyH != gHeight;
 
-    if (gTransfer == 1 && modelRanSmall)
+    // Forced, whatever the transfer setting, when the model saw a different picture from the frame:
+    // the proxy read above is the antialiased picture's, the original is the raw render, and the
+    // classic ratio between the two is the difference between an antialiased edge and an aliased
+    // one, which is not an edit the model made. Only the model's own difference may cross.
+    if ((gTransfer == 1 && modelRanSmall) || gForeign != 0)
     {
         // Saturated, because that is what the encode does and this has to reproduce it exactly.
         //

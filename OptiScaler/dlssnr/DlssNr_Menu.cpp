@@ -214,6 +214,37 @@ void RenderMenu(Config* config, float menuResScale)
                        "\n\nCosts two bilinear reads at render size. Applies on the next frame.");
         }
 
+        // What the model is shown on stage 1. Live: the DLAA feature is created on the first frame
+        // it is asked for and parked when it is not, so flicking between the two is a fair A/B.
+        {
+            static const char* inputNames[] = { "The game's raw render", "DLAA of the render (experimental)" };
+            int input = (int) std::min(config->DlssNrStage1Input.value_or_default(), 1u);
+
+            const bool stage1 = config->DlssNrStage.value_or_default() == 1 && !vulkan;
+
+            if (!stage1)
+                ImGui::BeginDisabled();
+
+            if (ImGui::Combo("Stage 1: what the model sees", &input, inputNames, IM_ARRAYSIZE(inputNames)))
+                config->DlssNrStage1Input = (uint32_t) input;
+
+            if (!stage1)
+                ImGui::EndDisabled();
+
+            HelpMarker("Before the upscaler the model is shown the game's raw render: jittered and"
+                       "\naliased, so every edge is re-rasterised each frame and the model re-decides"
+                       "\nit. Un-jittering takes back a quarter of that; the rest is the aliasing."
+                       "\n\nDLAA shows the model NVIDIA's own antialiasing of that render instead -- DLSS"
+                       "\nat 1:1, fed the same depth, motion vectors and jitter the game hands its own"
+                       "\nDLSS. The model then sees a picture that holds still. Its edit is still"
+                       "\ncomposed onto the raw render, read back by the jitter, and the game's DLSS"
+                       "\nstill receives its jittered frame; the DLAA picture is thrown away once the"
+                       "\nmodel has read it."
+                       "\n\nCosts one DLAA evaluate at render size, well under a millisecond. Takes one"
+                       "\nframe to appear the first time. If the driver refuses it, the log says why"
+                       "\nand the model sees the raw render.");
+        }
+
         // Any percentage, rather than a handful of steps somebody chose in advance. The lower bound
         // is 25%: below that the model is working on so little of the picture that its answer no
         // longer survives being enlarged onto it.

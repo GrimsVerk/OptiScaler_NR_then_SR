@@ -296,6 +296,14 @@ class Config
     // copy is never resampled, so strength 0 stays bit-identical. Does nothing on stage 0.
     CustomOptional<uint32_t> DlssNrUnjitter { 0 };
 
+    // What the model is shown before the upscaler. 0 the game's raw render, jittered and aliased.
+    // 1 the driver's own DLAA of that render -- DLSS at 1:1 -- an antialiased picture that holds
+    // still between frames, for the model's eyes only. The edit is composed onto the raw render
+    // either way and the game's DLSS still receives its jittered frame; the DLAA picture is
+    // discarded once the model has read it. Costs one DLAA evaluate at render size per frame.
+    // Un-jittering's resolve shift is always applied in mode 1, with the sign the control chose.
+    CustomOptional<uint32_t> DlssNrStage1Input { 0 };
+
     // How much of the model's edit reaches the frame. Separated because detail synthesis is a luminance
     // edit and any colour shift is usually the part you do not want, and allowed past 1.0 because
     // exaggerating an edit is the only honest way to see whether there is one.
