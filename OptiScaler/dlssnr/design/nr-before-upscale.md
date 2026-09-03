@@ -5,6 +5,12 @@ Status: BUILT and IN-GAME TESTED (2026-09-03) in Star Wars Jedi: Survivor, D3D12
 after-upscale path. Ray reconstruction, dynamic resolution and the D3D11 and Vulkan bridges were
 out of scope for that test and remain untested.
 
+The follow-up experiments on the stage 1 picture -- where its edge instability comes from, a
+motion-vector and history probe, un-jittering the model's input, and a DLAA pre-pass for the
+model's eyes -- were built, measured in-game, and judged by eye. None of them earned a place
+here; the picture the eye preferred was the raw render. They live, with the measurement tools and
+every number, on the branch `nr-stage1-tested-and-discarded`, so nobody has to repeat them.
+
 ## What the first test found
 
 Jedi Survivor, 4K windowed, DLSS Performance (1920x1080 render), the game's own DLSS frame
