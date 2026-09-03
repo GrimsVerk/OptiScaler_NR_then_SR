@@ -340,6 +340,22 @@ class Config
     // untouched whatever this is set to. 1.0 is full resolution and behaves exactly as before.
     CustomOptional<float> DlssNrWorkingScale { 1.0f };
 
+    // Where in the frame the model runs.
+    //
+    //   0  after the upscaler, over the finished display-resolution frame. The original design.
+    //   1  before the upscaler, over the game's render-resolution colour. The model's edit is
+    //      written to a private copy of that colour, and the upscaler is handed the copy in place
+    //      of the game's buffer. The frame the model works on is then the render size rather than
+    //      the display size, so its cost and memory fall with the upscaling ratio squared.
+    //
+    // Stage 1 is an experiment. The model is shown a jittered, pre-antialiasing frame it was not
+    // trained on, and whatever it synthesises is then enlarged by the upscaler. Whether that looks
+    // acceptable is exactly the question it exists to answer. Ray reconstruction evaluates are left
+    // on stage 0 regardless: their colour input is undenoised.
+    //
+    // D3D12 and the two bridges only. Native Vulkan stays on stage 0.
+    CustomOptional<uint32_t> DlssNrStage { 0 };
+
     // Ask the driver's own nvngx.dll whether it will dispatch Neural Rendering, once per session.
     //
     // Everything here drives the model's DLL directly through a forwarder, because the model refuses

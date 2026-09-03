@@ -457,7 +457,15 @@ bool IFeature_Dx11wDx12::Evaluate(ID3D11DeviceContext* InDeviceContext, NVSDK_NG
                               (void*) dx11Reactive.Dx12Resource);
 
         LOG_DEBUG("Dispatch!!");
-        dx12EvalResult = dx12Feature->Evaluate(cmdList, InParameters);
+
+        {
+            // Neural Rendering before the upscaler, when the stage says so. The block carries the
+            // D3D12 copies of the game's inputs at this point, so the model reads the render-size
+            // colour copy and the upscaler is handed the edited one. The bridge carries super
+            // resolution only, so every evaluate applies.
+            DlssNr::ScopedPreUpscale pre(cmdList, InParameters, true, Dx12CommandQueue);
+            dx12EvalResult = dx12Feature->Evaluate(cmdList, InParameters);
+        }
 
         // DLSS 5 Neural Rendering rides the bridge: at this moment the block carries the D3D12 copies
         // of every input, the list is still recording, and the model's edit lands on the D3D12 output

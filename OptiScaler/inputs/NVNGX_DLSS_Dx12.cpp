@@ -1149,8 +1149,20 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_EvaluateFeature(ID3D12GraphicsCom
         {
             LOG_DEBUG("Passthrough to native DLSS EvaluateFeature for handle {}", handleId);
 
-            NVSDK_NGX_Result result =
-                NVNGXProxy::D3D12_EvaluateFeature()(InCmdList, InFeatureHandle, InParameters, InCallback);
+            const bool isUpscale = feature != NVSDK_NGX_Feature_FrameGeneration;
+            NVSDK_NGX_Result result;
+
+            {
+                // Neural Rendering before the upscaler, when the stage says so: the model edits a
+                // copy of the render-size colour and the upscaler is handed that copy for the
+                // duration of this evaluate. A no-op on stage 0. Ray reconstruction is left to the
+                // after-upscale pass; its colour input is undenoised.
+                DlssNr::ScopedPreUpscale pre(InCmdList, InParameters,
+                                             isUpscale && feature != NVSDK_NGX_Feature_RayReconstruction);
+
+                result = NVNGXProxy::D3D12_EvaluateFeature()(InCmdList, InFeatureHandle, InParameters, InCallback);
+            }
+
             LOG_DEBUG("Native DLSS EvaluateFeature result: 0x{:X}", (uint32_t) result);
 
             // Neural Rendering runs over what the upscaler just wrote, on the same list, so frame
@@ -1158,7 +1170,8 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_EvaluateFeature(ID3D12GraphicsCom
             // rendered frame. The feature check is the point: frame generation is handed depth and
             // motion vectors too, and its handle can reach here because the branch above does not
             // return, so filtering on the parameter block alone would run the model twice a frame.
-            if (result == NVSDK_NGX_Result_Success && feature != NVSDK_NGX_Feature_FrameGeneration)
+            // Stands down by itself on stage 1, unless the pre-upscale scope declined the evaluate.
+            if (result == NVSDK_NGX_Result_Success && isUpscale)
                 DlssNr::EvaluateAfterUpscale(InCmdList, InParameters);
 
             return result;
@@ -1182,10 +1195,21 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_EvaluateFeature(ID3D12GraphicsCom
         InParameters->Set("DLSSG.CameraFar", lastDlssgCameraFar.value());
 
     // OptiScaler internal handling
-    const NVSDK_NGX_Result optiResult = TryEvaluateOptiFeature(InCmdList, InFeatureHandle, InParameters, InCallback);
+    const bool isUpscale = feature != NVSDK_NGX_Feature_FrameGeneration;
+    NVSDK_NGX_Result optiResult;
+
+    {
+        // The same pre-upscale scope as the native route above, for OptiScaler's own upscalers.
+        // Every upscaler in this tree reads its colour from the parameter block, so the swap
+        // reaches all of them -- and the shims for FSR and XeSS inputs arrive here too.
+        DlssNr::ScopedPreUpscale pre(InCmdList, InParameters,
+                                     isUpscale && feature != NVSDK_NGX_Feature_RayReconstruction);
+
+        optiResult = TryEvaluateOptiFeature(InCmdList, InFeatureHandle, InParameters, InCallback);
+    }
 
     // Same pass, for OptiScaler's own upscalers rather than native DLSS.
-    if (optiResult == NVSDK_NGX_Result_Success && feature != NVSDK_NGX_Feature_FrameGeneration)
+    if (optiResult == NVSDK_NGX_Result_Success && isUpscale)
         DlssNr::EvaluateAfterUpscale(InCmdList, InParameters);
 
     return optiResult;

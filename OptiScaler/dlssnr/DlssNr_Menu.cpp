@@ -152,6 +152,37 @@ void RenderMenu(Config* config, float menuResScale)
         ImGui::Spacing();
         ImGui::PushItemWidth(220.0f * menuResScale);
 
+        // Which side of the upscaler the model runs on. Takes effect on the next frame: the target
+        // changes size and format, which the pass already treats as a resolution change and rebuilds
+        // for. Native Vulkan has no before-upscale path and the control says so.
+        {
+            static const char* stageNames[] = { "After the upscaler", "Before the upscaler (experimental)" };
+            int stage = config->DlssNrStage.value_or_default() == 1 ? 1 : 0;
+
+            if (vulkan)
+                ImGui::BeginDisabled();
+
+            if (ImGui::Combo("Stage", &stage, stageNames, IM_ARRAYSIZE(stageNames)))
+                config->DlssNrStage = (uint32_t) stage;
+
+            if (vulkan)
+                ImGui::EndDisabled();
+
+            HelpMarker("Where in the frame the model runs."
+                       "\n\nAfter the upscaler is the original design: the model is shown the finished,"
+                       "\ndisplay-size frame and edits it in place. Its cost scales with the display"
+                       "\nresolution."
+                       "\n\nBefore the upscaler shows the model the game's render-size colour instead --"
+                       "\nthe picture the upscaler is about to enlarge -- and hands the upscaler the"
+                       "\nedited copy. The model then works on the smaller picture, so its cost and"
+                       "\nmemory fall with the upscaling ratio squared: at Performance mode, a quarter."
+                       "\n\nThe trade is unknown, which is why this exists. The model was trained on"
+                       "\nfinished frames, and here it sees a jittered, aliased one; whatever it"
+                       "\nsynthesises is then enlarged by the upscaler. Ray reconstruction stays on"
+                       "\nthe after-upscale side regardless, because its colour is undenoised."
+                       "\n\nD3D12 games and the D3D11 and Vulkan bridges. Not native Vulkan.");
+        }
+
         // Any percentage, rather than a handful of steps somebody chose in advance. The lower bound
         // is 25%: below that the model is working on so little of the picture that its answer no
         // longer survives being enlarged onto it.
