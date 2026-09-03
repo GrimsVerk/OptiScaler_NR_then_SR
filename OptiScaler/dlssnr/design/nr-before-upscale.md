@@ -160,8 +160,13 @@ By eye, in movement, the tester called DLAA *worse*: "more smooth and blurry", a
 against a raw path that "is actually clearer". The measurement and the eye do not disagree: the
 edit on an antialiased input is steadier because it is also gentler -- fewer hard edges to sharpen,
 so less added, and what is added is smoother -- and part of what reads as crispness on the raw
-path is the instability itself. Whether a higher detail strength on the DLAA input buys back the
-crispness without the wobble is the next one-line test.
+path is the instability itself. Detail strength 1.5 on the DLAA input did not buy it back: "raw is
+better, more stable looking in motion, at both strengths". So the static measurement and the
+moving eye part company here. In motion the DLAA picture carries its own temporal behaviour --
+history blending, a little smear on fast edges -- and the model edits that, then the edit is read
+back onto the raw frame through a bilinear shift; the result reads as softer and less settled
+than the model's own answer on the raw raster. The DLAA input stays in the code as an option,
+off by default, with this verdict against it. What the eye prefers on stage 1 is the raw render.
 
 Half the wobble gone at edges and in the flat, in one step, with no hand-written temporal filter.
 Stage 1 with DLAA now sits at twice stage 0's edge wobble and matches it in the flat. What is left
