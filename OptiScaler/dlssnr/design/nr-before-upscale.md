@@ -74,6 +74,39 @@ kills it, the ghost is the history. If a multiplier kills it, that multiplier is
 mismatch and becomes the fix. If nothing moves it, the model does this to a single frame and the
 remaining lever is detail strength.
 
+**The probe's answer: nothing.** Reset every frame, motion scale 0, -1, 0.5 and 2 -- none of them
+changed the artefact, which on a closer look is not a trailing copy but a fuzzy, unstable edge on
+the character. So it is not the model's temporal history at all. It is the model re-deciding the
+edge on every frame.
+
+**Measured**, in the game's photo mode (frozen world, static camera), eight consecutive frames,
+per-pixel temporal standard deviation of luminance, `design/dlssnr-stability.ps1`:
+
+| | Stage 0 (after, 3840x2160) | Stage 1 (before, 2560x1440) |
+|---|---|---|
+| The frame itself, at edges | 0.0087 | 0.068 |
+| The model's edit, at edges | 0.0041 | 0.0151 |
+| The frame itself, flat areas | 0.00063 | 0.0019 |
+| The model's edit, flat areas | 0.00045 | 0.00126 |
+
+The frame the model sees on stage 1 is eight times less stable at edges than on stage 0, because
+it is aliased and jittered, and the model's edit is 3.7 times less stable in turn. The model damps
+what it is given -- its edit moves a fifth as much as its input at edges -- but what it is given
+moves a lot. The upscaler is built to integrate the frame's own jitter; the edit's wobble is not
+jitter, so it cannot, and it lands on screen as the fuzzy edge.
+
+So the jitter *is* the cause after all, through a different mechanism than the design assumed:
+not the model's reprojection, but its per-frame spatial answer to an input that shifts under it.
+The fix is to show the model a picture that does not shift: resample the colour by the negative
+of the game's jitter offset before the encode, so the model works on a stable grid, and resample
+its edit back by the jitter before composing it onto the untouched original. The original is never
+resampled -- strength 0 stays bit-identical -- and the game's jitter offsets are in the parameter
+block already (`Jitter.Offset.X/Y`). The sign convention is engine-dependent; try both.
+
+The zero-code alternative worth measuring first: stage 0 with the working scale at 50% costs the
+same as stage 1 at Performance and shows the model a stable, antialiased frame; the difference is
+whether the synthesised detail is enlarged by the pass or by the upscaler.
+
 And one thing the design hoped for is not there: **the model has no jitter parameter.** The DLL
 exposes 61 `DLSSNR.*` names -- colour, depth, motion vectors, the masks, the subrects, the
 strengths, `ScalingRatio`, `Reset` -- and none of them is jitter. The first fix under "what is
