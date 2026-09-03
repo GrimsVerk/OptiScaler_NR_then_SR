@@ -41,6 +41,31 @@ Two things were wrong and were fixed the same day:
    were in different spaces and the pair looked like the model had darkened the frame by a stop.
    It records the HDR copy now.
 
+### Where the ghosting and the boiling come from
+
+Four experiments, all in the same session, same scene, judged by eye by the tester:
+
+| Change | Ghosting round the head | Boiling on fine detail |
+|---|---|---|
+| Detail strength 1.0 -> 0.5 | halves | unchanged |
+| Detail strength -> 0 | gone | unchanged |
+| Model resolution 100% -> 75% and lower | unchanged (picture softens) | unchanged until the softness hides it |
+| Strength 0, stage 0, and NR disabled outright | -- | identical in all three |
+| Strength 1.0, stage 0 (after the upscaler) | present, but less | -- |
+
+And one measurement: at detail strength 0 on stage 1, the copy handed to the upscaler was
+byte-identical to the game's frame in all eight captured frames (`dlssnr-rawcompare.ps1`, zero
+differing pixels). The pass writes nothing it should not.
+
+So: the **boiling is DLSS's own** and not this module's business. The **ghost is in the model's
+answer** -- it scales with how much of that answer is blended in, it is there on the after-upscale
+path as well, and stage 1 makes it bigger because the upscaler enlarges it. Jitter is therefore
+not its cause, at most an amplifier, and the motion-vector offset pass is no longer the first
+thing to try. The first thing to try is the motion vectors the model is given at all: the ghost
+is the signature of a temporal history that is not being moved far enough, or not rejected where
+it should be. A scale, sign or unit mismatch between what the game hands DLSS and what the model
+expects would produce it on both stages, and would be cheap to probe with a diagnostic multiplier.
+
 And one thing the design hoped for is not there: **the model has no jitter parameter.** The DLL
 exposes 61 `DLSSNR.*` names -- colour, depth, motion vectors, the masks, the subrects, the
 strengths, `ScalingRatio`, `Reset` -- and none of them is jitter. The first fix under "what is
