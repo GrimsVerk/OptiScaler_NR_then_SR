@@ -117,6 +117,29 @@ tester could not tell the two apart by eye, which is consistent: once the conten
 the aliased input changes every frame whatever the jitter does. Un-jittering therefore buys back
 the still and slow-moving case, not the fast one.
 
+### Un-jittering, measured
+
+`[DlssNr] Unjitter`, live under the Stage control. Same spot in photo mode, DLSS Performance,
+model at 1920x1080, one capture per state:
+
+| Un-jitter | Edit wobble at edges (median) | Edit wobble, flat |
+|---|---|---|
+| Off | 0.0070 | 0.00054 |
+| On, +jitter | 0.0050 | 0.00042 |
+| On, -jitter | 0.0066 | 0.00055 |
+
++jitter is the right sign for Unreal (the game reports `Jitter.Offset` in the range of a third
+of a pixel), and it takes about a quarter of the wobble away. It does not take it to stage 0's
+0.0016, and the reason is that a jittered raster is not merely a shifted picture: the coverage of
+every aliased edge is re-decided by the rasteriser at each sub-pixel offset, and a bilinear shift
+back cannot rebuild the edge the other offset would have drawn. The remainder is the cost of
+showing the model an aliased frame at all. The way to remove it is to show the model an
+antialiased one, which on this side of the upscaler means accumulating the proxy over time with
+the game's motion vectors and jitter -- a small temporal filter on the model's *input*, not on its
+answer, which the README rightly measured as a dead end. That is the next experiment if stage 1
+is to be pursued; the alternative is the one already measured above, stage 0 at a working scale
+that matches the cost.
+
 And one thing the design hoped for is not there: **the model has no jitter parameter.** The DLL
 exposes 61 `DLSSNR.*` names -- colour, depth, motion vectors, the masks, the subrects, the
 strengths, `ScalingRatio`, `Reset` -- and none of them is jitter. The first fix under "what is
