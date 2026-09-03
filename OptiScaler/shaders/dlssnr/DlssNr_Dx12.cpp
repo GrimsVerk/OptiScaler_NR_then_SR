@@ -2067,6 +2067,27 @@ bool DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
     // working size.
     const float mvToWork = width != 0 ? (float) workWidth / (float) width : 1.0f;
 
+    // The diagnostics, which are 1, 1 and off unless somebody is chasing the ghost. See Config.h.
+    const float probeMvX = cfg.DlssNrProbeMvScaleX.value_or_default();
+    const float probeMvY = cfg.DlssNrProbeMvScaleY.value_or_default();
+    const bool probeReset = cfg.DlssNrProbeResetEveryFrame.value_or_default();
+
+    {
+        static float saidProbeX = 1.0f, saidProbeY = 1.0f;
+        static bool saidProbeReset = false;
+
+        if (saidProbeX != probeMvX || saidProbeY != probeMvY || saidProbeReset != probeReset)
+        {
+            saidProbeX = probeMvX;
+            saidProbeY = probeMvY;
+            saidProbeReset = probeReset;
+            LOG_INFO("DLSS-NR probe: motion vector scale x{} x{}, reset every frame {}; the model is "
+                     "handed scale {} x {}",
+                     probeMvX, probeMvY, probeReset ? "on" : "off", g_nr.guideMvScaleX * mvToWork * probeMvX,
+                     g_nr.guideMvScaleY * mvToWork * probeMvY);
+        }
+    }
+
     SetExtras(cfg, nullptr, nullptr, 0, 0, 0, 0);
 
     // The proxy path, when asked for. Same inputs, same model -- the difference is who calls it.
@@ -2104,11 +2125,11 @@ bool DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
     const int result = g_nr.evaluate(
         cmdList, g_nr.feature, g_nr.capabilityParams, modelInput, depthIn, motionIn, g_nr.output,
         workWidth, workHeight, guideWidth, guideHeight, g_nr.guideDepthInverted ? 1 : 0,
-        g_nr.reset ? 1 : 0, cfg.DlssNrIntensity.value_or_default(),
+        (g_nr.reset || probeReset) ? 1 : 0, cfg.DlssNrIntensity.value_or_default(),
         (int) cfg.DlssNrStyle.value_or_default(), cfg.DlssNrLocalStructure.value_or_default(),
         cfg.DlssNrLocalTone.value_or_default(), cfg.DlssNrSkinStructure.value_or_default(),
-        cfg.DlssNrAutoMask.value_or_default() ? 1 : 0, g_nr.guideMvScaleX * mvToWork,
-        g_nr.guideMvScaleY * mvToWork);
+        cfg.DlssNrAutoMask.value_or_default() ? 1 : 0, g_nr.guideMvScaleX * mvToWork * probeMvX,
+        g_nr.guideMvScaleY * mvToWork * probeMvY);
 
     if (g_ngxTime != nullptr)
         g_ngxTime->End(cmdList);

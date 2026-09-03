@@ -361,6 +361,9 @@ bool Config::Reload(std::filesystem::path iniPath)
             DlssNrLocalTone.set_from_config(readFloat("DlssNr", "LocalTone"));
             DlssNrSkinStructure.set_from_config(readFloat("DlssNr", "SkinStructure"));
             DlssNrAutoMask.set_from_config(readBool("DlssNr", "AutoMask"));
+            DlssNrProbeMvScaleX.set_from_config(readFloat("DlssNr", "ProbeMvScaleX"));
+            DlssNrProbeMvScaleY.set_from_config(readFloat("DlssNr", "ProbeMvScaleY"));
+            DlssNrProbeResetEveryFrame.set_from_config(readBool("DlssNr", "ProbeResetEveryFrame"));
             UseGenericAppIdWithDlss.set_from_config(readBool("DLSS", "UseGenericAppIdWithDlss"));
 
             RenderPresetOverride.set_from_config(readBool("DLSS", "RenderPresetOverride"));
@@ -1249,6 +1252,12 @@ bool Config::SaveIni()
     ini.SetValue("DlssNr", "SkinStructure",
                  GetFloatValue(Instance()->DlssNrSkinStructure.value_for_config()).c_str());
     ini.SetValue("DlssNr", "AutoMask", GetBoolValue(Instance()->DlssNrAutoMask.value_for_config()).c_str());
+    ini.SetValue("DlssNr", "ProbeMvScaleX",
+                 GetFloatValue(Instance()->DlssNrProbeMvScaleX.value_for_config()).c_str());
+    ini.SetValue("DlssNr", "ProbeMvScaleY",
+                 GetFloatValue(Instance()->DlssNrProbeMvScaleY.value_for_config()).c_str());
+    ini.SetValue("DlssNr", "ProbeResetEveryFrame",
+                 GetBoolValue(Instance()->DlssNrProbeResetEveryFrame.value_for_config()).c_str());
         ini.SetValue("DLSS", "RenderPresetOverride",
                      GetBoolValue(Instance()->RenderPresetOverride.value_for_config()).c_str());
         ini.SetValue("DLSS", "RenderPresetForAll",

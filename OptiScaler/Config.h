@@ -270,6 +270,22 @@ class Config
     CustomOptional<float> DlssNrSkinStructure { -1.0f };
     CustomOptional<bool> DlssNrAutoMask { true };
 
+    // Diagnostics for the model's temporal history. All three leave the picture alone at their
+    // defaults, and none of them is a setting anyone should keep.
+    //
+    // The two multipliers act on the motion vector scale handed to the model, on top of the game's
+    // own scale and the working-scale ratio. They exist because the model ghosts behind moving
+    // objects on both sides of the upscaler (Jedi Survivor, 2026-09-03), which is what a history
+    // moved the wrong distance, or in the wrong direction, looks like. 0 tells the model nothing
+    // moved; -1 flips the direction; 0.5 and 2 halve and double the distance. If any of those
+    // changes the ghost, the game's vector convention and the model's disagree.
+    //
+    // Reset every frame throws the model's history away each evaluate. If the ghost vanishes, it
+    // is the history; if it stays, it is something the model does to a single frame.
+    CustomOptional<float> DlssNrProbeMvScaleX { 1.0f };
+    CustomOptional<float> DlssNrProbeMvScaleY { 1.0f };
+    CustomOptional<bool> DlssNrProbeResetEveryFrame { false };
+
     // How much of the model's edit reaches the frame. Separated because detail synthesis is a luminance
     // edit and any colour shift is usually the part you do not want, and allowed past 1.0 because
     // exaggerating an edit is the only honest way to see whether there is one.

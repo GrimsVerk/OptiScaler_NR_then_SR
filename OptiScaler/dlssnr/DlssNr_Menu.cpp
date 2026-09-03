@@ -330,6 +330,41 @@ void RenderMenu(Config* config, float menuResScale)
 
         HelpMarker("Lets the model find skin itself rather than treating the frame uniformly.");
 
+        ImGui::SeparatorText("Diagnostics");
+
+        ImGui::TextDisabled("For chasing the ghost behind moving objects. 1, 1 and off leave the\n"
+                            "picture exactly as it was. Applied on the next frame; nothing rebuilds.");
+
+        {
+            float probeX = config->DlssNrProbeMvScaleX.value_or_default();
+            if (ImGui::SliderFloat("Probe: motion scale X", &probeX, -2.0f, 2.0f, "%.3f"))
+                config->DlssNrProbeMvScaleX = probeX;
+
+            float probeY = config->DlssNrProbeMvScaleY.value_or_default();
+            if (ImGui::SliderFloat("Probe: motion scale Y", &probeY, -2.0f, 2.0f, "%.3f"))
+                config->DlssNrProbeMvScaleY = probeY;
+
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Both 1"))
+            {
+                config->DlssNrProbeMvScaleX = 1.0f;
+                config->DlssNrProbeMvScaleY = 1.0f;
+            }
+
+            HelpMarker("Multipliers on the motion vector scale the model is given, on top of the"
+                       "\ngame's own scale. 0 tells the model nothing moved; -1 flips the direction;"
+                       "\n0.5 and 2 halve and double the distance. Ctrl+click a slider to type a value."
+                       "\n\nIf any of these changes the ghost, the game's vector convention and the"
+                       "\nmodel's disagree, and the value that kills it says how.");
+
+            bool probeReset = config->DlssNrProbeResetEveryFrame.value_or_default();
+            if (ImGui::Checkbox("Probe: reset history every frame", &probeReset))
+                config->DlssNrProbeResetEveryFrame = probeReset;
+
+            HelpMarker("Throws the model's temporal history away on every frame. If the ghost"
+                       "\nvanishes, it is the history. If it stays, the model does it to a single frame.");
+        }
+
         ImGui::SeparatorText("Colour");
 
         ImGui::TextDisabled("The model was trained on finished, sRGB-encoded frames. The upscaler's\n"
