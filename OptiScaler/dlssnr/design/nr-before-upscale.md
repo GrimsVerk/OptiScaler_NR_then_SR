@@ -185,3 +185,24 @@ compare views, the timing -- works unchanged on either side. They are all functi
 - No change to the composition. The proxy, the ratio transfer, the hue correction and the guard
   are the same code on both sides. If the model's answer on a jittered frame needs a different
   composition, that is a second experiment, not this one.
+
+## Parked
+
+Seen during the Jedi Survivor testing, noted by the tester, deliberately not chased yet. Neither
+is known to be this module's fault.
+
+- **Latency rose when frame generation was turned off.** The game's own readout: about 50 ms
+  with DLSS frame generation on, about 80 ms with it off, and it could be felt. Seen with stage 1
+  on. Could be OptiScaler, this branch, or the game; the tester recalls a well-known title
+  behaving the same way on its own. Where to start: whether Reflex is still armed once the
+  frame-generation evaluates stop (OptiScaler reports frame generation as off after six
+  evaluates without it, through `ReflexHooks::setDlssgFrameCount(0)`), and whether the upstream
+  build behaves the same in the same spot.
+- **VRAM.** The tester watches it while playing and sees it get very close to full on a 16 GB
+  card with the pass on. A ReShade route to the same model leaked until the game hitched;
+  OptiScaler holds up better but any reduction is wanted. Where to start: stage 1 already cuts
+  the model's working set with the upscaling ratio squared; check that parked resources
+  (`ParkNrResource`, freed 32 evaluates later) do not pile up across quality-mode rebuilds; list
+  what the pass allocates at create -- the guides, output, the two copies, the small proxy, the
+  capture buffers, the stage 1 scratch -- and measure a long session on both stages with the
+  game's own readout.
