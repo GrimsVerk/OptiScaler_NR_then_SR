@@ -129,7 +129,9 @@ model at 1920x1080, one capture per state:
 | On, -jitter | 0.0066 | 0.00055 |
 
 +jitter is the right sign for Unreal (the game reports `Jitter.Offset` in the range of a third
-of a pixel), and it takes about a quarter of the wobble away. It does not take it to stage 0's
+of a pixel), and it takes about a quarter of the wobble away. By eye, in movement, the tester
+could not tell +jitter from off: a quarter of the static wobble is below what the eye picks out
+once the content itself is moving. It does not take it to stage 0's
 0.0016, and the reason is that a jittered raster is not merely a shifted picture: the coverage of
 every aliased edge is re-decided by the rasteriser at each sub-pixel offset, and a bilinear shift
 back cannot rebuild the edge the other offset would have drawn. The remainder is the cost of
