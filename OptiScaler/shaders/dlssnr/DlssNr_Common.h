@@ -105,6 +105,13 @@ struct DlssNrFrameInfo
     // its output -- a private copy of the game's colour -- and rests it in UNORDERED_ACCESS; reading
     // the config for that copy would transition it out of a state it was never in.
     int OutputState = -1;
+
+    // The game's sub-pixel jitter for this frame, in render pixels, as it told the upscaler
+    // (Jitter.Offset.X/Y). Zero when the game did not say. Only the before-upscale path has any use
+    // for it: the frame it shows the model is the jittered one, and the model re-decides edges on a
+    // picture that shifts under it. The after-upscale frame is already resolved.
+    float JitterX = 0.0f;
+    float JitterY = 0.0f;
 };
 
 struct alignas(256) DlssNrConstants
@@ -173,6 +180,17 @@ struct alignas(256) DlssNrConstants
     // two captures at different exposures then differ by the exposure, whatever the edit did. This
     // is the user's own multiplier, which holds still while the meter works.
     float DebugScale;
+
+    // Un-jittering, for the before-upscale path. Appended after everything else so the Vulkan
+    // shader, which shares this layout and was not rebuilt, keeps reading the prefix it knows.
+    //
+    // The game's jitter for this frame in render pixels, and what to do with it: 0 nothing, 1 the
+    // encode samples the frame at +jitter and the resolve reads the model's answer back at -jitter,
+    // 2 the same with the signs swapped. The sign convention is the engine's, so both exist. The
+    // untouched copy is never resampled -- strength 0 stays bit-identical either way.
+    float JitterX;
+    float JitterY;
+    uint32_t Unjitter;
 };
 
 class DlssNr_Common

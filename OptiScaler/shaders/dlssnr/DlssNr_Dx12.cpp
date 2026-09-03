@@ -2006,6 +2006,25 @@ bool DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
     encodeParams.Width = width;
     encodeParams.Height = height;
 
+    // Un-jittering only has a jittered frame to act on before the upscaler. After it the frame is
+    // resolved, and the offset would only move a still picture.
+    const uint32_t unjitter = sourceIsTarget ? 0u : cfg.DlssNrUnjitter.value_or_default();
+    encodeParams.JitterX = frame.JitterX;
+    encodeParams.JitterY = frame.JitterY;
+    encodeParams.Unjitter = unjitter;
+
+    {
+        static uint32_t saidUnjitter = 0;
+
+        if (saidUnjitter != unjitter)
+        {
+            saidUnjitter = unjitter;
+            LOG_INFO("DLSS-NR un-jitter: {} (this frame's jitter {} x {})",
+                     unjitter == 0 ? "off" : unjitter == 1 ? "sample at +jitter" : "sample at -jitter",
+                     frame.JitterX, frame.JitterY);
+        }
+    }
+
     // The encode reads the source's top-left width x height. That is the whole source on the
     // after-upscale path; on the before-upscale path the source may be a dynamic-resolution game's
     // full allocation, of which the render subrect -- the target's size -- is what was drawn.
@@ -2198,6 +2217,9 @@ bool DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
         resolveParams.CompareSplit = cfg.DlssNrCompareSplit.value_or_default();
         resolveParams.CompareZoom = std::max(1.0f, cfg.DlssNrCompareZoom.value_or_default());
         resolveParams.CompareSwap = cfg.DlssNrCompareSwap.value_or_default() ? 1u : 0u;
+        resolveParams.JitterX = frame.JitterX;
+        resolveParams.JitterY = frame.JitterY;
+        resolveParams.Unjitter = unjitter;
 
         // The numbers the composition actually ran with, logged when any of them changes.
         //
@@ -2404,6 +2426,13 @@ DlssNrFrameInfo GatherFrame(NVSDK_NGX_Parameter* params)
 
     if (params->Get(NVSDK_NGX_Parameter_MV_Scale_Y, &frame.MvScaleY) != NVSDK_NGX_Result_Success)
         frame.MvScaleY = 1.0f;
+
+    // The frame's jitter, for the before-upscale path to un-jitter what the model sees.
+    if (params->Get(NVSDK_NGX_Parameter_Jitter_Offset_X, &frame.JitterX) != NVSDK_NGX_Result_Success)
+        frame.JitterX = 0.0f;
+
+    if (params->Get(NVSDK_NGX_Parameter_Jitter_Offset_Y, &frame.JitterY) != NVSDK_NGX_Result_Success)
+        frame.JitterY = 0.0f;
 
     // What the game says about its own exposure. Logged, used for nothing yet.
     //

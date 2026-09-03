@@ -286,6 +286,16 @@ class Config
     CustomOptional<float> DlssNrProbeMvScaleY { 1.0f };
     CustomOptional<bool> DlssNrProbeResetEveryFrame { false };
 
+    // Before the upscaler, show the model a frame that does not shift under it.
+    //
+    // The render-size frame is sub-pixel jittered every frame and the model re-decides every edge
+    // on it; measured in Jedi Survivor at three times the frame-to-frame instability of the same
+    // model on a resolved frame, and seen as a fuzzy, unstable edge on anything with a silhouette.
+    // 1 samples the frame at +jitter on the way in and reads the answer back at -jitter; 2 does the
+    // same with the signs swapped, because the convention is the engine's. 0 is off. The untouched
+    // copy is never resampled, so strength 0 stays bit-identical. Does nothing on stage 0.
+    CustomOptional<uint32_t> DlssNrUnjitter { 0 };
+
     // How much of the model's edit reaches the frame. Separated because detail synthesis is a luminance
     // edit and any colour shift is usually the part you do not want, and allowed past 1.0 because
     // exaggerating an edit is the only honest way to see whether there is one.

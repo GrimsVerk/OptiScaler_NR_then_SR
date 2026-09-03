@@ -25,7 +25,20 @@ cbuffer Params : register(b0)
     uint  gCompareSwap;  // put the edited frame on the other side
     uint  gTransfer;     // 0 classic, 1 matched residual -- how a below-size model comes back
     float gDebugScale;   // what the debug views are scaled by, held still while the meter moves
+    float gJitterX;      // the game's sub-pixel jitter this frame, render pixels
+    float gJitterY;
+    uint  gUnjitter;     // 0 off, 1 sample the frame at +jitter and read the answer back at -jitter, 2 signs swapped
 };
+
+// The offset, in frame pixels, that un-jittering moves the model's view of the frame by. Zero when
+// off, so every read below that adds it is exactly the read it was before.
+float2 UnjitterOffset()
+{
+    if (gUnjitter == 0)
+        return float2(0.0, 0.0);
+
+    return float2(gJitterX, gJitterY) * (gUnjitter == 2 ? -1.0 : 1.0);
+}
 
 // Bringing an impossible colour back into a possible one.
 //
@@ -514,6 +527,26 @@ void CSMain(uint3 id : SV_DispatchThreadID)
         // Kept so the resolve has the frame as it was, rather than having to reconstruct it.
         gKeep[id.xy] = float4(frame, source.a);
 
+        // Before the upscaler the frame is the game's jittered render: the whole picture sits a
+        // fraction of a pixel away from where it sat last frame, and the model re-decides every
+        // edge on a picture that shifts under it. Measured in Jedi Survivor at three times the
+        // frame-to-frame instability of the same model on a resolved frame. Sampling the frame
+        // back by the jitter shows the model a picture that holds still; the copy kept above is
+        // untouched, and the resolve reads the answer back by the same offset.
+        //
+        // Normalised against the source's own size rather than the dispatch's: on that path the
+        // source may be a dynamic-resolution game's larger allocation, of which this dispatch is
+        // the drawn corner.
+        const float2 unjitter = UnjitterOffset();
+
+        if (any(unjitter != 0.0))
+        {
+            uint srcW, srcH;
+            gSource.GetDimensions(srcW, srcH);
+            const float2 srcUv = (float2(id.xy) + 0.5 + unjitter) / float2(srcW, srcH);
+            frame = max(gSource.SampleLevel(gLinear, srcUv, 0).rgb, float3(0.0, 0.0, 0.0));
+        }
+
         // Some games hand DLSS a frame that has already been through their tonemapper. The game says
         // which in its own DLSS creation flags, and converting one that needs no conversion is pure
         // damage, so it goes through untouched.
@@ -578,8 +611,13 @@ void CSMain(uint3 id : SV_DispatchThreadID)
 
     // Sampled rather than loaded: when the model ran at a reduced resolution these are smaller than the
     // frame, and its edit is enlarged here while the frame underneath stays untouched.
-    float4 proxySample = gSource.SampleLevel(gLinear, cmpUv, 0);
-    float4 modelSample = gModel.SampleLevel(gLinear, cmpUv, 0);
+    //
+    // Both read back by the un-jitter offset the encode applied, so the proxy and the model's
+    // answer land on the frame's own grid again. The two move together, so their difference -- the
+    // edit -- is what was computed, only put back where it belongs. Nothing when un-jittering is off.
+    const float2 readUv = cmpUv - UnjitterOffset() / float2(gWidth, gHeight);
+    float4 proxySample = gSource.SampleLevel(gLinear, readUv, 0);
+    float4 modelSample = gModel.SampleLevel(gLinear, readUv, 0);
 
     // Nothing was encoded on the way in, so nothing is decoded here either.
     float3 proxy = gPassthrough != 0 ? proxySample.rgb : SrgbToLinear(proxySample.rgb);

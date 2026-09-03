@@ -103,9 +103,19 @@ its edit back by the jitter before composing it onto the untouched original. The
 resampled -- strength 0 stays bit-identical -- and the game's jitter offsets are in the parameter
 block already (`Jitter.Offset.X/Y`). The sign convention is engine-dependent; try both.
 
-The zero-code alternative worth measuring first: stage 0 with the working scale at 50% costs the
-same as stage 1 at Performance and shows the model a stable, antialiased frame; the difference is
-whether the synthesised detail is enlarged by the pass or by the upscaler.
+The zero-code alternative, measured (same spot, same render size, model at 1920x1080 both ways,
+luminance compressed x/(1+x) first so the sun cannot dominate, edge medians):
+
+| | Stage 0, working scale 50% | Stage 1, working scale 100% |
+|---|---|---|
+| The frame the model sees, at edges | 0.0042 | 0.0146 |
+| The model's edit, at edges | 0.0016 | 0.0046 |
+| The model's edit, flat | 0.0002 | 0.0005 |
+
+Three times less stable on stage 1 for the same model cost, in a frozen scene. In motion the
+tester could not tell the two apart by eye, which is consistent: once the content itself moves,
+the aliased input changes every frame whatever the jitter does. Un-jittering therefore buys back
+the still and slow-moving case, not the fast one.
 
 And one thing the design hoped for is not there: **the model has no jitter parameter.** The DLL
 exposes 61 `DLSSNR.*` names -- colour, depth, motion vectors, the masks, the subrects, the

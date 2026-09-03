@@ -183,6 +183,37 @@ void RenderMenu(Config* config, float menuResScale)
                        "\n\nD3D12 games and the D3D11 and Vulkan bridges. Not native Vulkan.");
         }
 
+        // Stage 1's companion. Live: the offset is a constant the encode and the resolve read every
+        // frame, so nothing rebuilds and the three states can be compared by flicking between them.
+        {
+            static const char* unjitterNames[] = { "Off", "On (+jitter)", "On (-jitter)" };
+            int unjitter = (int) std::min(config->DlssNrUnjitter.value_or_default(), 2u);
+
+            const bool stage1 = config->DlssNrStage.value_or_default() == 1 && !vulkan;
+
+            if (!stage1)
+                ImGui::BeginDisabled();
+
+            if (ImGui::Combo("Un-jitter (before the upscaler)", &unjitter, unjitterNames, IM_ARRAYSIZE(unjitterNames)))
+                config->DlssNrUnjitter = (uint32_t) unjitter;
+
+            if (!stage1)
+                ImGui::EndDisabled();
+
+            HelpMarker("Before the upscaler the model is shown the game's jittered render: the whole"
+                       "\npicture sits a fraction of a pixel away from where it sat last frame, and the"
+                       "\nmodel re-decides every edge on it. Measured at three times the frame-to-frame"
+                       "\ninstability of the same model on a resolved frame, and seen as a fuzzy,"
+                       "\nunstable silhouette."
+                       "\n\nOn samples the frame back by the jitter on the way in, so the model sees a"
+                       "\npicture that holds still, and reads its answer back by the same offset on the"
+                       "\nway out. The game's own frame is never resampled; at detail strength 0 the"
+                       "\noutput is still bit-identical."
+                       "\n\nTwo signs because the convention is the engine's. One of them steadies the"
+                       "\nedge; the other doubles the shift. Try both and keep the one that holds still."
+                       "\n\nCosts two bilinear reads at render size. Applies on the next frame.");
+        }
+
         // Any percentage, rather than a handful of steps somebody chose in advance. The lower bound
         // is 25%: below that the model is working on so little of the picture that its answer no
         // longer survives being enlarged onto it.
