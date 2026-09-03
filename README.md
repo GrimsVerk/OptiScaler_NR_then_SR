@@ -1,3 +1,31 @@
+## This fork: DLSS 5 Neural Rendering, before or after the upscaler
+
+This is OptiScaler plus an extra pass that drives NVIDIA's DLSS 5 Neural Rendering model
+(`nvngx_dlssnr.dll`, RTX 50 series only) over the frames OptiScaler already handles, in any
+DirectX 12 game that uses DLSS. It builds on dag's DLSS 5 Neural Rendering work for OptiScaler and
+adds one thing: a **Stage** control that runs the model *before* the upscaler, over the game's
+render-resolution frame, instead of after it over the finished display-size frame.
+
+Before the upscaler the model's time and memory fall with the upscaling ratio squared. Measured in
+Star Wars Jedi: Survivor at 4K DLSS Performance on an RTX 5080: 11.7 ms per frame down to 3.6 ms.
+Combined with the existing Model resolution slider it can be pushed further. The trade is a slightly
+restless silhouette on moving characters, scaled by Detail strength. Everything else in OptiScaler is
+unchanged.
+
+- **Download:** the Releases page. Extract into the game folder, run `setup_windows.bat`, supply your
+  own `nvngx_dlssnr.dll`, turn it on in the overlay. Full instructions in
+  `READ ME - DLSS Neural Rendering.txt`.
+- **Design and test record:** [`OptiScaler/dlssnr/design/nr-before-upscale.md`](OptiScaler/dlssnr/design/nr-before-upscale.md).
+  The experiments that were tried against the picture and set aside live on the branch
+  `nr-stage1-tested-and-discarded`.
+- **Wanted:** reports from 12 GB cards at 1440p, and any game other than Jedi Survivor.
+
+Nothing here is supported or documented by NVIDIA. The colour composition is RenoDX's, by clshortfuse,
+under its MIT licence; see `Licenses/RenoDX_ATTRIBUTION.txt`. The rest of this page is upstream
+OptiScaler's own README.
+
+<hr />
+
 <div align="center">
 
   ![Logo](https://github.com/user-attachments/assets/c7dad5da-0b29-4710-8a57-b58e4e407abd)
