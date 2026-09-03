@@ -142,6 +142,27 @@ answer, which the README rightly measured as a dead end. That is the next experi
 is to be pursued; the alternative is the one already measured above, stage 0 at a working scale
 that matches the cost.
 
+### The DLAA pre-pass, measured
+
+`[DlssNr] Stage1Input=1`, live under the un-jitter control. The driver's own DLSS at 1:1 over the
+render, fed the game's own depth, motion vectors, jitter, exposure and creation flags, into a
+surface only the model reads; the edit is composed onto the raw render, read back by the jitter,
+and the game's DLSS still gets its jittered frame. Same spot in photo mode, DLSS Performance, model
+at 1920x1080:
+
+| What the model sees | Edit wobble at edges (median) | Edit wobble, flat |
+|---|---|---|
+| The raw render | 0.0065 | 0.00052 |
+| The DLAA of the render | 0.0030 | 0.00025 |
+| (Stage 0 at working scale 50%, for reference) | 0.0016 | 0.00020 |
+
+Half the wobble gone at edges and in the flat, in one step, with no hand-written temporal filter.
+Stage 1 with DLAA now sits at twice stage 0's edge wobble and matches it in the flat. What is left
+at edges is the bilinear read-back of the edit onto the jittered raw frame, plus whatever the model
+does to a steady picture on its own. The DLAA feature was created by the driver without complaint
+(flags 0x49: HDR, inverted depth, auto exposure, as the game's own DLSS is created). Its GPU cost is
+not yet in the pass's timing row; it sits outside the bracket.
+
 And one thing the design hoped for is not there: **the model has no jitter parameter.** The DLL
 exposes 61 `DLSSNR.*` names -- colour, depth, motion vectors, the masks, the subrects, the
 strengths, `ScalingRatio`, `Reset` -- and none of them is jitter. The first fix under "what is
