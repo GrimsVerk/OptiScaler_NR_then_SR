@@ -186,6 +186,29 @@ compare views, the timing -- works unchanged on either side. They are all functi
   are the same code on both sides. If the model's answer on a jittered frame needs a different
   composition, that is a second experiment, not this one.
 
+## Rebased onto upstream, 2026-09-07
+
+The branch was rebased onto `dlss-neural-rendering` at `97376162` (fifteen commits: the reversible
+proxy modes, frame hold, zero-latency GPU exposure, supersampling above 100% with its own down-leg,
+the exposure-scan fixes). What had to change to meet them:
+
+- **Exposure texture.** The encode and resolve now take the game's live exposure texture as an
+  extra input. Both sides of the upscaler pass it through unchanged: the texture is the game's, at
+  1x1, and means the same thing whichever frame the model is shown.
+- **Supersampling down-leg.** The resolve reads the native proxy and the model's answer averaged
+  back to native when the working scale is above 1.0. Stage 1 keeps that: "native" is then the
+  render size, and the answer is averaged back to it before the upscaler sees the copy.
+- **Frame hold.** Upstream freezes the encode's input by copying the target aside at hold-on and
+  copying it back over the target every held frame. Before the upscaler the encode's input is the
+  game's colour, which the pass never writes, so there is nothing to copy back over. Instead the
+  capture is taken from the game's colour (moved to COPY_SOURCE for the copy and put back) and,
+  while held, the encode reads the held copy in the colour's place. After the upscaler the
+  behaviour is byte-identical to upstream. The upscaler still runs on a held stage-1 frame, so
+  what it does with a frozen, jittered input is part of the picture -- the hold's menu text says
+  the upscaler is not re-run, which is true only after the upscaler.
+
+Not retested after the rebase yet; compile only. The hold on stage 1 has never been run.
+
 ## Parked
 
 Seen during the Jedi Survivor testing, noted by the tester, deliberately not chased yet. Neither
