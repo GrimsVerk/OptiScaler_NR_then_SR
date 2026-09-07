@@ -207,7 +207,10 @@ the exposure-scan fixes). What had to change to meet them:
   what it does with a frozen, jittered input is part of the picture -- the hold's menu text says
   the upscaler is not re-run, which is true only after the upscaler.
 
-Not retested after the rebase yet; compile only. The hold on stage 1 has never been run.
+Retested the same day in Jedi Survivor (D3D12, 4K, DLSS Quality 2560x1440 -> 3840x2160, frame generation
+off, stage 1, model resolution 80%): no visual complaint from the tester, and the whole-frame GPU time at
+the same spot matched the pre-rebase build, 17.6 ms both. The pass's own readout: 4.38 ms total, 4.19 ms
+model, 0.19 ms ours. The hold on stage 1 has not been exercised.
 
 ## Parked
 
@@ -229,3 +232,17 @@ is known to be this module's fault.
   what the pass allocates at create -- the guides, output, the two copies, the small proxy, the
   capture buffers, the stage 1 scratch -- and measure a long session on both stages with the
   game's own readout.
+
+Seen in the 7 September logs and traces, after the rebase. None chased; none known to be stage 1's.
+
+- **Exposure scan overflows its cap in Jedi Survivor.** Upstream's scan adopts a 16-byte buffer as
+  candidate 1, then reports more than 64 candidates and calls its own filter too loose here; Unreal
+  creates many tiny UAV buffers. Upstream's code, but this game is a good test case for it.
+- **"D3D12Device created with non-primary GPU"** twice per launch. Probably the integrated GPU
+  being enumerated. Harmless as far as anyone can tell.
+- **A thread inside the model DLL spins a full core during play**, seen in the CPU traces taken
+  for the game's own performance work. Not in the game's thread list. Whether the model runtime
+  polls, and whether it does so on stage 0 too, is unknown.
+- **About 900 log lines a second at LogLevel 1 during play**, four per present from LocalPresent
+  and one per frame from the input health check, written synchronously on the present path.
+  Diagnostic level only; the default level does not do this.
